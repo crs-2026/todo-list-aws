@@ -23,7 +23,7 @@ class TestApi(unittest.TestCase):
         print('---------------------------------------')
         print('Starting - integration test List TODO')
         #Add TODO
-        url = BASE_URL+"/todos"
+        url = BASE_URL+"/todos/"
         data = {
          "text": "Integration text example"
         }
@@ -40,7 +40,7 @@ class TestApi(unittest.TestCase):
             jsonbody['text'], "Integration text example", "Error en la petición API a {url}"
         )
         #List
-        url = BASE_URL+"/todos"
+        url = BASE_URL+"/todos/"
         response = requests.get(url)
         print('Response List Todo:' + str(response.json()))
         self.assertEqual(
@@ -52,7 +52,7 @@ class TestApi(unittest.TestCase):
     def test_api_addtodo(self):
         print('---------------------------------------')
         print('Starting - integration test Add TODO')
-        url = BASE_URL+"/todos"
+        url = BASE_URL+"/todos/"
         data = {
          "text": "Integration text example"
         }
@@ -78,7 +78,7 @@ class TestApi(unittest.TestCase):
         print('---------------------------------------')
         print('Starting - integration test Get TODO')
         #Add TODO
-        url = BASE_URL+"/todos"
+        url = BASE_URL+"/todos/"
         data = {
          "text": "Integration text example - GET"
         }
@@ -116,7 +116,7 @@ class TestApi(unittest.TestCase):
         print('---------------------------------------')
         print('Starting - integration test Update TODO')
         #Add TODO
-        url = BASE_URL+"/todos"
+        url = BASE_URL+"/todos/"
         data = {
          "text": "Integration text example - Initial"
         }
@@ -169,7 +169,7 @@ class TestApi(unittest.TestCase):
         print('---------------------------------------')
         print('Starting - integration test Delete TODO')
         #Add TODO
-        url = BASE_URL+"/todos"
+        url = BASE_URL+"/todos/"
         data = {
          "text": "Integration text example - Initial"
         }
