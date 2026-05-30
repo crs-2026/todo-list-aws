@@ -57,12 +57,10 @@ class TestApi(unittest.TestCase):
          "text": "Integration text example"
         }
        response = requests.post(url, data=json.dumps(data))
-
-print("STATUS:", response.status_code)
-print("TEXT:", response.text)
-
-json_response = response.json()
-print("JSON:", json_response)
+       print("STATUS:", response.status_code)
+       print("TEXT:", response.text)
+       json_response = response.json()
+       print("JSON:", json_response)
         jsonbody= json.loads(json_response['body'])
         ID_TODO = jsonbody['id']
         print ('ID todo:'+ID_TODO)
