@@ -58,8 +58,13 @@ class TestApi(unittest.TestCase):
         }
         response = requests.post(url, data=json.dumps(data))
         json_response = response.json()
-        print('Response Add Todo: '+ json_response['body'])
-        jsonbody= json.loads(json_response['body'])
+        print('Response Add Todo: ' + str(json_response))
+        # Si la API devuelve el objeto directo (como en los otros tests que pasaron):
+        if 'id' in json_response:
+            jsonbody = json_response
+        else:
+            # Por si acaso la estructura varía en este método concreto
+            jsonbody = json.loads(json_response.get('body', '{}'))
         ID_TODO = jsonbody['id']
         print ('ID todo:'+ID_TODO)
         self.assertEqual(
