@@ -186,7 +186,7 @@ class TestApi(unittest.TestCase):
             jsonbody['text'], "Integration text example - Initial", "Error en la petición API a {url}"
         )
         #Delete TODO to restore state
-        response = requests.delete(url + '/' + ID_TODO)
+        response = requests.delete(url + ID_TODO)
         self.assertEqual(
             response.status_code, 200, "Error en la petición API a {url}"
         )
