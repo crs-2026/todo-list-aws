@@ -25,7 +25,6 @@ class TestApi(unittest.TestCase):
         #Add TODO
 
         url = BASE_URL+"/todos/"
-        origin/develop
         data = {
          "text": "Integration text example"
         }
