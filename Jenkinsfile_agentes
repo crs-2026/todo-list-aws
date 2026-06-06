@@ -1,0 +1,139 @@
+pipeline {
+    agent any // Agente por defecto para la orquestación y el despliegue (Nodo principal)
+
+    environment {
+        AWS_DEFAULT_REGION = 'us-east-1'
+        S3_BUCKET          = 'aws-sam-cli-managed-default-samclisourcebucket-w2rxf671dndk'
+        AGENTE_ESTATICO     = 'static_agent' 
+        AGENTE_REST         = 'rest_agent'
+    }
+
+    stages {
+        /*
+         * ==========================================================
+         * ETAPA: ANÁLISIS ESTÁTICO (Solo en flujo CI - Rama develop)
+         * Ejecutado en el Agente especializado en analisis estatico
+         * ==========================================================
+         */
+        stage('Static Analysis') {
+            when { branch 'develop' }
+            agent { label "${env.AGENTE_ESTATICO}" }
+            steps {
+                echo "Ejecutando análisis estático en agente dedicado: ${env.NODE_NAME}"
+                sh '''
+                python3 -m venv venv_estatico
+                . venv_estatico/bin/activate
+                pip install flake8 bandit
+                flake8 src/
+                bandit -r src/
+                deactivate
+                '''
+            }
+        }
+
+        /*
+         * ==========================================================
+         * ETAPA: GET CODE (Común para CI y CD)
+         * ==========================================================
+         */
+        stage('Get Code') {
+            steps {
+                echo "Descargando código en el agente por defecto..."
+                checkout scm
+            }
+        }
+
+        /*
+         * ==========================================================
+         * ETAPA: DEPLOY (Dinamizado para Staging o Production)
+         * ==========================================================
+         */
+        stage('Deploy') {
+            steps {
+                script {
+                    // Configuración dinámica según la rama activa
+                    if (env.BRANCH_NAME == 'develop') {
+                        env.STACK_NAME = 'todo-list-aws-staging'
+                        env.STAGE_PARAM = 'staging'
+                    } else {
+                        env.STACK_NAME = 'todo-list-aws-production'
+                        env.STAGE_PARAM = 'production'
+                    }
+                }
+                echo "Desplegando Stack ${env.STACK_NAME} en el agente por defecto..."
+                sh '''
+                sam build
+                sam deploy \
+                    --stack-name ${STACK_NAME} \
+                    --s3-bucket ${S3_BUCKET} \
+                    --capabilities CAPABILITY_IAM \
+                    --no-confirm-changeset \
+                    --no-fail-on-empty-changeset \
+                    --parameter-overrides Stage="${STAGE_PARAM}"
+                
+                # SOLUCIÓN CLAVE: Extraemos la URL y la guardamos en un fichero
+                aws cloudformation describe-stacks \
+                    --stack-name ${STACK_NAME} \
+                    --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
+                    --output text > api_url.txt
+                '''
+                
+                # Guardamos el archivo en la memoria central de Jenkins
+                stash name: 'api-endpoint', includes: 'api_url.txt'
+            }
+        }
+
+        /*
+         * ==========================================================
+         * ETAPA: REST TEST (Ejecutado en Agente de Pruebas dedicado)
+         * ==========================================================
+         */
+        stage('Rest Test') {
+            agent { label "${env.AGENTE_REST}" }
+            steps {
+                echo "Arrancando pruebas de API en agente dedicado: ${env.NODE_NAME}"
+                
+                # Recuperamos el archivo con la URL que guardó el agente anterior
+                unstash 'api-endpoint'
+                
+                sh '''
+                # Leemos el archivo recuperado y lo asignamos a la variable de entorno del agente
+                export API_URL=$(cat api_url.txt)
+                echo "URL recuperada con éxito en el agente de pruebas: $API_URL"
+                
+                python3 -m venv venv_integration
+                . venv_integration/bin/activate
+                pip install pytest requests
+                
+                export BASE_URL=$API_URL
+                
+                # Ejecución condicional: CI (Todos los tests) vs CD (Solo lectura)
+                if [ "${BRANCH_NAME}" = "develop" ]; then
+                    echo "Flujo CI detectado: Ejecutando suite completa de integración..."
+                    pytest --junitxml=result-integration.xml test/integration/todoApiTest.py
+                else
+                    echo "Flujo CD detectado: Limitando a pruebas de Solo Lectura..."
+                    pytest -k "listtodos" --junitxml=result-production.xml test/integration/todoApiTest.py
+                fi
+                
+                deactivate
+                '''
+            }
+            post {
+                always {
+                    script {
+                        def reportFile = (env.BRANCH_NAME == 'develop') ? 'result-integration.xml' : 'result-production.xml'
+                        junit testResults: reportFile, allowEmptyResults: true
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Limpieza general del espacio de trabajo del pipeline...'
+            cleanWs()
+        }
+    }
+}
