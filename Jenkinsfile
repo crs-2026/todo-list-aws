@@ -5,7 +5,7 @@ pipeline {
         // ========== CONFIGURACIÓN DE PRODUCCIÓN ==========
         AWS_DEFAULT_REGION = 'us-east-1' 
         STACK_NAME         = 'todo-list-aws-production' // Nombre del Stack diferenciado para Producción
-        S3_BUCKET          = 'aws-sam-cli-managed-default-samclisourcebucket-w2rxf671dndk' // Tu bucket de artefactos SAM
+        S3_BUCKET          = 'aws-sam-cli-managed-default-samclisourcebucket-w2rxf671dndk' // Mi bucket de artefactos SAM
         GIT_REPO_URL       = 'https://github.com/crs-2026/todo-list-aws.git'
     }
 
