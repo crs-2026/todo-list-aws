@@ -67,10 +67,11 @@ pipeline {
                 echo "Desplegando Stack ${env.STACK_NAME} en el agente por defecto..."
                 
                 // Envolvemos el entorno con el bloque de credenciales de AWS secretas
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding', 
-                    credentialsId: 'Jenkins'
-                ]]) {
+               withCredentials([
+                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
+				
                     sh '''
                     echo "=== IDENTIDAD DEL AGENTE DE DESPLIEGUE ==="
                     whoami
