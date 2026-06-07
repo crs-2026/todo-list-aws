@@ -131,7 +131,7 @@ class TestApi(unittest.TestCase):
         url_update = BASE_URL + "/todos/" + ID_TODO
         data = {
          "text": "Integration text example - Modified",
-         "checked": "true"
+         "checked": True
         }
         response = requests.put(url_update, data=json.dumps(data))
         json_response = response.json()
