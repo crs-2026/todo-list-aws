@@ -125,33 +125,46 @@ pipeline {
                 // Recuperamos el archivo con la URL que guardó el agente anterior
                 unstash 'api-endpoint'
                 
-                sh '''
-                # Leemos el archivo recuperado y lo asignamos a la variable de entorno del agente
-                export API_URL=$(cat api_url.txt)
-                echo "URL recuperada con éxito en el agente de pruebas: $API_URL"
-                
-                python3 -m venv venv_integration
-                . venv_integration/bin/activate
-                pip install pytest requests
-                
-                export BASE_URL=$API_URL
-                
-                # Ejecución condicional: CI (Todos los tests) vs CD (Solo lectura)
-                if [ "${BRANCH_NAME}" = "develop" ]; then
-                    echo "Flujo CI detectado: Ejecutando suite completa de integración..."
-                    pytest --junitxml=result-integration.xml test/integration/todoApiTest.py
-                else
-                    echo "Flujo CD detectado: Limitando a pruebas de Solo Lectura..."
-                    pytest -k "listtodos" --junitxml=result-production.xml test/integration/todoApiTest.py
-                fi
-                
-                deactivate
-                '''
+                script {
+                    // Calculamos de la rama real 
+                    def actualBranch = env.BRANCH_NAME ?: sh(script: "git name-rev --name-only HEAD | sed 's|remotes/origin/||'", returnStdout: true).trim()
+                    echo "Rama detectada para pruebas: ${actualBranch}"
+                    
+                    // Inyectamos la variable directamente al entorno de ejecución del bloque SH
+                    withEnv(["REAL_BRANCH=${actualBranch}"]) {
+                        sh '''
+                        # Leemos el archivo recuperado y lo asignamos a la variable de entorno del agente
+                        export API_URL=$(cat api_url.txt)
+                        echo "URL recuperada con éxito en el agente de pruebas: $API_URL"
+                        
+                        python3 -m venv venv_integration
+                        . venv_integration/bin/activate
+                        pip install pytest requests
+                        
+                        export BASE_URL=$API_URL
+                        
+                        # Ejecución condicional
+                        if [ "$REAL_BRANCH" = "develop" ] || [ "$REAL_BRANCH" = "HEAD" ]; then
+                            echo "Flujo CI detectado: Ejecutando suite completa de integración..."
+                            pytest --junitxml=result-integration.xml test/integration/todoApiTest.py
+                        else
+                            echo "Flujo CD detectado: Limitando a pruebas de Solo Lectura..."
+                            pytest -k "listtodos" --junitxml=result-production.xml test/integration/todoApiTest.py
+                        fi
+                        
+                        deactivate
+                        '''
+                    }
+                }
             }
             post {
                 always {
                     script {
-                        def reportFile = (env.BRANCH_NAME == 'develop') ? 'result-integration.xml' : 'result-production.xml'
+                        // Corregimos también la lógica del reporte usando el mismo truco adaptativo
+                        def actualBranch = env.BRANCH_NAME ?: sh(script: "git name-rev --name-only HEAD | sed 's|remotes/origin/||'", returnStdout: true).trim()
+                        def reportFile = (actualBranch == 'develop' || actualBranch == 'HEAD') ? 'result-integration.xml' : 'result-production.xml'
+                        
+                        echo "Buscando reporte de pruebas: ${reportFile}"
                         junit testResults: reportFile, allowEmptyResults: true
                     }
                 }
