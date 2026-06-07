@@ -55,18 +55,19 @@ pipeline {
         stage('Deploy') {
             steps {
                 script {
-                    // Capturamos de forma segura la rama real si BRANCH_NAME no está definido
-                    def actualBranch = env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
-                    echo "Rama detectada en el sistema: ${actualBranch}"
+                    
+                    def actualBranch = env.BRANCH_NAME ?: sh(script: "git name-rev --name-only HEAD | sed 's|remotes/origin/||'", returnStdout: true).trim()
+                    echo "Rama real detectada: ${actualBranch}"
 
-                    if (actualBranch == 'develop' || actualBranch == 'origin/develop') {
+                    
+                    if (actualBranch == 'develop' || actualBranch == 'HEAD') {
                         env.STACK_NAME = 'todo-list-aws-staging'
                         env.STAGE_PARAM = 'staging'
                     } else {
                         env.STACK_NAME = 'todo-list-aws-production'
                         env.STAGE_PARAM = 'production'
                     }
-				}
+                }
                 echo "Desplegando Stack ${env.STACK_NAME} en el agente por defecto..."
                 
                 // Envolvemos el entorno con el bloque de credenciales de AWS secretas
@@ -165,8 +166,8 @@ pipeline {
         stage('Promote') {
             when {
                 expression {
-                    def actualBranch = env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
-                    return (actualBranch == 'develop' || actualBranch == 'origin/develop')
+                    def actualBranch = env.BRANCH_NAME ?: sh(script: "git name-rev --name-only HEAD | sed 's|remotes/origin/||'", returnStdout: true).trim()
+                    return (actualBranch == 'develop' || actualBranch == 'HEAD')
                 }
             }
             steps {
