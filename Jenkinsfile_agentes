@@ -66,6 +66,7 @@ pipeline {
                         env.STACK_NAME = 'todo-list-aws-production'
                         env.STAGE_PARAM = 'production'
                     }
+				}
                 echo "Desplegando Stack ${env.STACK_NAME} en el agente por defecto..."
                 
                 // Envolvemos el entorno con el bloque de credenciales de AWS secretas
@@ -191,7 +192,7 @@ pipeline {
             }
         }
     }
-}
+
 
     post {
         always {
