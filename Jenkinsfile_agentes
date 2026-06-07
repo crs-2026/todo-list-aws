@@ -16,7 +16,7 @@ pipeline {
          * ==========================================================
          */
         stage('Static Analysis') {
-            when { branch 'develop' }
+            //when { branch 'develop' }
             agent { label "${env.AGENTE_ESTATICO}" }
             steps {
                 echo "Ejecutando análisis estático en agente dedicado: ${env.NODE_NAME}"
