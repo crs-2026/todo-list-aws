@@ -4,8 +4,8 @@ pipeline {
     environment {
         AWS_DEFAULT_REGION = 'us-east-1'
         S3_BUCKET          = 'aws-sam-cli-managed-default-samclisourcebucket-w2rxf671dndk'
-        AGENTE_ESTATICO     = 'static_agent' 
-        AGENTE_REST         = 'rest_agent'
+        AGENTE_ESTATICO    = 'static_agent' 
+        AGENTE_REST        = 'rest_agent'
     }
 
     stages {
@@ -21,6 +21,10 @@ pipeline {
             steps {
                 echo "Ejecutando análisis estático en agente dedicado: ${env.NODE_NAME}"
                 sh '''
+				echo "=== IDENTIDAD DEL AGENTE ESTÁTICO ==="
+                whoami
+                hostname
+                echo "======================================"
                 python3 -m venv venv_estatico
                 . venv_estatico/bin/activate
                 pip install flake8 bandit
@@ -45,7 +49,7 @@ pipeline {
 
         /*
          * ==========================================================
-         * ETAPA: DEPLOY (Dinamizado para Staging o Production)
+         * ETAPA: DEPLOY (Inyección de Credenciales AWS)
          * ==========================================================
          */
         stage('Deploy') {
@@ -61,24 +65,36 @@ pipeline {
                     }
                 }
                 echo "Desplegando Stack ${env.STACK_NAME} en el agente por defecto..."
-                sh '''
-                sam build
-                sam deploy \
-                    --stack-name ${STACK_NAME} \
-                    --s3-bucket ${S3_BUCKET} \
-                    --capabilities CAPABILITY_IAM \
-                    --no-confirm-changeset \
-                    --no-fail-on-empty-changeset \
-                    --parameter-overrides Stage="${STAGE_PARAM}"
                 
-                # Extraemos la URL y la guardamos en un fichero
-                aws cloudformation describe-stacks \
-                    --stack-name ${STACK_NAME} \
-                    --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
-                    --output text > api_url.txt
-                '''
+                // Envolvemos el entorno con el bloque de credenciales de AWS secretas
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding', 
+                    credentialsId: 'Jenkins'
+                ]]) {
+                    sh '''
+                    echo "=== IDENTIDAD DEL AGENTE DE DESPLIEGUE ==="
+                    whoami
+                    hostname
+                    echo "=========================================="
+                    sam build
+                    
+                    sam deploy \
+                        --stack-name ${STACK_NAME} \
+                        --s3-bucket ${S3_BUCKET} \
+                        --capabilities CAPABILITY_IAM \
+                        --no-confirm-changeset \
+                        --no-fail-on-empty-changeset \
+                        --parameter-overrides Stage="${STAGE_PARAM}"
+                    
+                    # Extraemos la URL y la guardamos en un fichero
+                    aws cloudformation describe-stacks \
+                        --stack-name ${STACK_NAME} \
+                        --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
+                        --output text > api_url.txt
+                    '''
+                }
                 
-                //Guardamos el archivo en la memoria central de Jenkins
+                // Guardamos el archivo con la url
                 stash name: 'api-endpoint', includes: 'api_url.txt'
             }
         }
@@ -93,7 +109,7 @@ pipeline {
             steps {
                 echo "Arrancando pruebas de API en agente dedicado: ${env.NODE_NAME}"
                 
-                //Recuperamos el archivo con la URL que guardó el agente anterior
+                // Recuperamos el archivo con la URL que guardó el agente anterior
                 unstash 'api-endpoint'
                 
                 sh '''
@@ -125,6 +141,36 @@ pipeline {
                         def reportFile = (env.BRANCH_NAME == 'develop') ? 'result-integration.xml' : 'result-production.xml'
                         junit testResults: reportFile, allowEmptyResults: true
                     }
+                }
+            }
+        }
+
+        /*
+         * ============================================================================
+         * ETAPA: PROMOTE (Solo se activa en la rama develop para automatizar el merge)
+         * ============================================================================
+         */
+        stage('Promote') {
+            when { branch 'develop' } 
+            steps {
+                echo 'Promocionando código a producción (Merge de Develop -> master)...'
+                
+                withCredentials([usernamePassword(credentialsId: 'Jenkins', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
+                    sh '''
+                    git config user.name "crs"
+                    
+                    
+                    # Traemos la rama master limpia del servidor
+                    git fetch origin master:master
+                    git checkout master
+                    
+                    # Hacemos merge de los cambios aprobados
+                    git merge origin/develop --no-edit
+                    
+                    # Inyectamos credenciales de manera segura para hacer push al repositorio remoto
+                    git remote set-url origin https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/crs-2026/todo-list-aws.git
+                    git push origin master
+                    '''
                 }
             }
         }
