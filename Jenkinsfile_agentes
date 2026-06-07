@@ -68,9 +68,9 @@ pipeline {
                 
                 // Envolvemos el entorno con el bloque de credenciales de AWS secretas
                withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'ACC_KEY'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'SEC_KEY'),
-					string(credentialsId: 'AWS_SESSION_TOKEN', variable: 'SESS_TOK')
+                    string(credentialsId: 'aws-access-key', variable: 'SEC_ACCESS_KEY'),
+                    string(credentialsId: 'aws-secret-key', variable: 'SEC_SECRET_KEY'),
+                    string(credentialsId: 'aws-session-token', variable: 'SEC_SESSION_TOKEN')
                 ]) {
 				
                     sh '''
@@ -78,7 +78,14 @@ pipeline {
                     whoami
                     hostname
                     echo "=========================================="
-                    sam build
+                    
+					# Mapeamos las variables seguras a las variables estándar que busca AWS CLI y SAM
+                    export AWS_ACCESS_KEY_ID="${SEC_ACCESS_KEY}"
+                    export AWS_SECRET_ACCESS_KEY="${SEC_SECRET_KEY}"
+                    export AWS_SESSION_TOKEN="${SEC_SESSION_TOKEN}"
+                    export AWS_DEFAULT_REGION="us-east-1"
+					
+					sam build
                     
                     sam deploy \
                         --stack-name ${STACK_NAME} \
