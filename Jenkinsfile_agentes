@@ -71,14 +71,14 @@ pipeline {
                     --no-fail-on-empty-changeset \
                     --parameter-overrides Stage="${STAGE_PARAM}"
                 
-                # SOLUCIÓN CLAVE: Extraemos la URL y la guardamos en un fichero
+                # Extraemos la URL y la guardamos en un fichero
                 aws cloudformation describe-stacks \
                     --stack-name ${STACK_NAME} \
                     --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
                     --output text > api_url.txt
                 '''
                 
-                # Guardamos el archivo en la memoria central de Jenkins
+                //Guardamos el archivo en la memoria central de Jenkins
                 stash name: 'api-endpoint', includes: 'api_url.txt'
             }
         }
@@ -93,7 +93,7 @@ pipeline {
             steps {
                 echo "Arrancando pruebas de API en agente dedicado: ${env.NODE_NAME}"
                 
-                # Recuperamos el archivo con la URL que guardó el agente anterior
+                //Recuperamos el archivo con la URL que guardó el agente anterior
                 unstash 'api-endpoint'
                 
                 sh '''
