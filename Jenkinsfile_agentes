@@ -1,27 +1,26 @@
 pipeline {
-    agent any // Agente por defecto para la orquestación y el despliegue (Nodo principal)
+    agent any // Nodo principal por defecto (para Get Code y Deploy)
 
     environment {
         AWS_DEFAULT_REGION = 'us-east-1'
-        S3_BUCKET          = 'aws-sam-cli-managed-default-samclisourcebucket-w2rxf671dndk'
         AGENTE_ESTATICO    = 'static_agent' 
         AGENTE_REST        = 'rest_agent'
+        // Definimos el Stack fijo de Staging para las consultas de la CLI de AWS
+        STACK_NAME         = 'todo-list-aws-staging'
     }
 
     stages {
         /*
          * ==========================================================
-         * ETAPA: ANÁLISIS ESTÁTICO (Solo en flujo CI - Rama develop)
-         * Ejecutado en el Agente especializado en analisis estatico
+         * ETAPA 1: ANÁLISIS ESTÁTICO (Ejecutado en Agente Dedicado)
          * ==========================================================
          */
         stage('Static Analysis') {
-            //when { branch 'develop' }
             agent { label "${env.AGENTE_ESTATICO}" }
             steps {
                 echo "Ejecutando análisis estático en agente dedicado: ${env.NODE_NAME}"
                 sh '''
-				echo "=== IDENTIDAD DEL AGENTE ESTÁTICO ==="
+                echo "=== IDENTIDAD DEL AGENTE ESTÁTICO ==="
                 whoami
                 hostname
                 echo "======================================"
@@ -37,69 +36,55 @@ pipeline {
 
         /*
          * ==========================================================
-         * ETAPA: GET CODE (Común para CI y CD)
+         * ETAPA 2: GET CODE (Inyección de Configuración Externa - Reto 4)
          * ==========================================================
          */
         stage('Get Code') {
             steps {
-                echo "Descargando código en el agente por defecto..."
+                echo "[CI - Staging] Descargando código fuente de la aplicación..."
                 checkout scm
+                
+                echo "[CI - Staging] Descargando archivo samconfig.toml desde la rama STAGING externa..."
+                // Descargamos usando curl directamente desde la rama staging del repositorio de configuración
+                sh "curl -sS https://raw.githubusercontent.com/crs-2026/todo-list-aws-config/staging/samconfig.toml -o samconfig.toml"
+                
+                echo "=== VERIFICACIÓN DEL SAMCONFIG.TOML DESCARGADO ==="
+                sh "cat samconfig.toml"
+                echo "=================================================="
             }
         }
 
         /*
          * ==========================================================
-         * ETAPA: DEPLOY (Inyección de Credenciales AWS)
+         * ETAPA 3: DEPLOY (Despliegue Limpio con AWS SAM)
          * ==========================================================
          */
         stage('Deploy') {
             steps {
-                script {
-                    
-                    def actualBranch = env.BRANCH_NAME ?: sh(script: "git name-rev --name-only HEAD | sed 's|remotes/origin/||'", returnStdout: true).trim()
-                    echo "Rama real detectada: ${actualBranch}"
-
-                    
-                    if (actualBranch == 'develop' || actualBranch == 'HEAD') {
-                        env.STACK_NAME = 'todo-list-aws-staging'
-                        env.STAGE_PARAM = 'staging'
-                    } else {
-                        env.STACK_NAME = 'todo-list-aws-production'
-                        env.STAGE_PARAM = 'production'
-                    }
-                }
-                echo "Desplegando Stack ${env.STACK_NAME} en el agente por defecto..."
+                echo "Desplegando en el entorno de STAGING con la configuración externa..."
                 
-                // Envolvemos el entorno con el bloque de credenciales de AWS secretas
-               withCredentials([
+                withCredentials([
                     string(credentialsId: 'aws-access-key', variable: 'SEC_ACCESS_KEY'),
                     string(credentialsId: 'aws-secret-key', variable: 'SEC_SECRET_KEY'),
                     string(credentialsId: 'aws-session-token', variable: 'SEC_SESSION_TOKEN')
                 ]) {
-				
                     sh '''
                     echo "=== IDENTIDAD DEL AGENTE DE DESPLIEGUE ==="
                     whoami
                     hostname
                     echo "=========================================="
                     
-					# Mapeamos las variables seguras a las variables estándar que busca AWS CLI y SAM
                     export AWS_ACCESS_KEY_ID="${SEC_ACCESS_KEY}"
                     export AWS_SECRET_ACCESS_KEY="${SEC_SECRET_KEY}"
                     export AWS_SESSION_TOKEN="${SEC_SESSION_TOKEN}"
                     export AWS_DEFAULT_REGION="us-east-1"
-					
-					sam build
                     
-                    sam deploy \
-                        --stack-name ${STACK_NAME} \
-                        --s3-bucket ${S3_BUCKET} \
-                        --capabilities CAPABILITY_IAM \
-                        --no-confirm-changeset \
-                        --no-fail-on-empty-changeset \
-                        --parameter-overrides Stage="${STAGE_PARAM}"
+                    sam build
                     
-                    # Extraemos la URL y la guardamos en un fichero
+                    # sam deploy ahora es minimalista; extrae todo del samconfig.toml de staging
+                    sam deploy
+                    
+                    # Extraemos la URL generada por CloudFormation para usarla en los tests
                     aws cloudformation describe-stacks \
                         --stack-name ${STACK_NAME} \
                         --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
@@ -107,14 +92,14 @@ pipeline {
                     '''
                 }
                 
-                // Guardamos el archivo con la url
+                // Hacemos un stash del archivo para pasárselo al agente de pruebas remotas
                 stash name: 'api-endpoint', includes: 'api_url.txt'
             }
         }
 
         /*
          * ==========================================================
-         * ETAPA: REST TEST (Ejecutado en Agente de Pruebas dedicado)
+         * ETAPA 4: REST TEST (Ejecutado en Agente de Pruebas Dedicado)
          * ==========================================================
          */
         stage('Rest Test') {
@@ -122,83 +107,62 @@ pipeline {
             steps {
                 echo "Arrancando pruebas de API en agente dedicado: ${env.NODE_NAME}"
                 
-                // Recuperamos el archivo con la URL que guardó el agente anterior
+                // Recuperamos el endpoint guardado por el agente de despliegue
                 unstash 'api-endpoint'
                 
-                script {
-                    // Calculamos de la rama real 
-                    def actualBranch = env.BRANCH_NAME ?: sh(script: "git name-rev --name-only HEAD | sed 's|remotes/origin/||'", returnStdout: true).trim()
-                    echo "Rama detectada para pruebas: ${actualBranch}"
-                    
-                    // Inyectamos la variable directamente al entorno de ejecución del bloque SH
-                    withEnv(["REAL_BRANCH=${actualBranch}"]) {
-                        sh '''
-                        # Leemos el archivo recuperado y lo asignamos a la variable de entorno del agente
-                        export API_URL=$(cat api_url.txt)
-                        echo "URL recuperada con éxito en el agente de pruebas: $API_URL"
-                        
-                        python3 -m venv venv_integration
-                        . venv_integration/bin/activate
-                        pip install pytest requests
-                        
-                        export BASE_URL=$API_URL
-                        
-                        # Ejecución condicional
-                        if [ "$REAL_BRANCH" = "develop" ] || [ "$REAL_BRANCH" = "HEAD" ]; then
-                            echo "Flujo CI detectado: Ejecutando suite completa de integración..."
-                            pytest --junitxml=result-integration.xml test/integration/todoApiTest.py
-                        else
-                            echo "Flujo CD detectado: Limitando a pruebas de Solo Lectura..."
-                            pytest -k "listtodos" --junitxml=result-production.xml test/integration/todoApiTest.py
-                        fi
-                        
-                        deactivate
-                        '''
-                    }
-                }
+                sh '''
+                export API_URL=$(cat api_url.txt)
+                echo "URL de Staging recuperada con éxito: $API_URL"
+                
+                python3 -m venv venv_integration
+                . venv_integration/bin/activate
+                pip install pytest requests
+                
+                export BASE_URL=$API_URL
+                
+                echo "Flujo CI detectado en develop: Ejecutando la suite completa de integración (5 tests)..."
+                pytest --junitxml=result-integration.xml test/integration/todoApiTest.py
+                
+                deactivate
+                '''
             }
             post {
                 always {
-                    script {
-                        // Corregimos también la lógica del reporte usando el mismo truco adaptativo
-                        def actualBranch = env.BRANCH_NAME ?: sh(script: "git name-rev --name-only HEAD | sed 's|remotes/origin/||'", returnStdout: true).trim()
-                        def reportFile = (actualBranch == 'develop' || actualBranch == 'HEAD') ? 'result-integration.xml' : 'result-production.xml'
-                        
-                        echo "Buscando reporte de pruebas: ${reportFile}"
-                        junit testResults: reportFile, allowEmptyResults: true
-                    }
+                    echo "Publicando reportes de integración en Jenkins..."
+                    junit testResults: 'result-integration.xml', allowEmptyResults: true
                 }
             }
         }
 
         /*
-         * ============================================================================
-         * ETAPA: PROMOTE (Solo se activa en la rama develop para automatizar el merge)
-         * ============================================================================
+         * ==========================================================
+         * ETAPA 5: PROMOTE (Fusión automática protegiendo a Producción)
+         * ==========================================================
          */
         stage('Promote') {
-            when {
-                expression {
-                    def actualBranch = env.BRANCH_NAME ?: sh(script: "git name-rev --name-only HEAD | sed 's|remotes/origin/||'", returnStdout: true).trim()
-                    return (actualBranch == 'develop' || actualBranch == 'HEAD')
-                }
-            }
             steps {
-                echo 'Promocionando código a producción (Merge de Develop -> master)...'
+                echo 'Promocionando código a producción (Merge seguro de Develop -> master)...'
                 
                 withCredentials([usernamePassword(credentialsId: 'Jenkins', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
                     sh '''
                     git config user.name "crs"
+                    git config user.email "crs@example.com"
                     
-                    
-                    # Traemos la rama master limpia del servidor
+                    # Sincronizamos y descargamos la rama master limpia del servidor remoto
                     git fetch origin master:master
                     git checkout master
                     
-                    # Hacemos merge de los cambios aprobados
-                    git merge origin/develop --no-edit
+                    # Hacemos el merge de develop en master, pero detenemos el proceso antes del commit
+                    git merge origin/develop --no-commit --no-edit
                     
-                    # Inyectamos credenciales de manera segura para hacer push al repositorio remoto
+                    # Forzamos a que master conserve su propia versión de Jenkinsfile_agentes.
+                    # De esta forma, cuando master se ejecute, apuntará de forma fija a producción.
+                    git checkout HEAD Jenkinsfile_agentes
+                    
+                    # Confirmamos el commit del Merge con los archivos protegidos
+                    git commit -m "Merge branch 'develop' into master - Protegiendo configuración de producción"
+                    
+                    # Enviamos los cambios validados de vuelta a GitHub usando credenciales seguras
                     git remote set-url origin https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/crs-2026/todo-list-aws.git
                     git push origin master
                     '''
@@ -206,7 +170,6 @@ pipeline {
             }
         }
     }
-
 
     post {
         always {
