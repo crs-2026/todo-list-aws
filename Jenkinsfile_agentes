@@ -145,8 +145,10 @@ pipeline {
                 
                 withCredentials([usernamePassword(credentialsId: 'Jenkins', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
                     sh '''
-                    git config user.name "crs"
-                    git config user.email "crs@example.com"
+					rm -f samconfig.toml
+                    rm -f api_url.txt
+					git config user.name "crs"
+                    
                     
                     # Sincronizamos y descargamos la rama master limpia del servidor remoto
                     git fetch origin master:master
